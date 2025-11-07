@@ -1,0 +1,630 @@
+import React, { useState, useEffect, useRef } from ‘react’;
+import { Play, Pause, RotateCcw, Settings, Info } from ‘lucide-react’;
+
+const IndustrialPhysicsSimulator = () => {
+const [activeSimulation, setActiveSimulation] = useState(‘conveyor’);
+const [isPlaying, setIsPlaying] = useState(false);
+const [showInfo, setShowInfo] = useState(false);
+const canvasRef = useRef(null);
+const animationRef = useRef(null);
+
+// Estados para diferentes simulaciones
+const [conveyorState, setConveyorState] = useState({
+boxes: [],
+beltSpeed: 50,
+friction: 0.3,
+time: 0
+});
+
+const [collisionState, setCollisionState] = useState({
+balls: [
+{ x: 100, y: 200, vx: 80, vy: 0, mass: 2, radius: 20, color: ‘#3B82F6’ },
+{ x: 500, y: 200, vx: -40, vy: 30, mass: 3, radius: 25, color: ‘#EF4444’ }
+],
+restitution: 0.8
+});
+
+const [craneMechanism, setCraneMechanism] = useState({
+armAngle: 45,
+armLength: 150,
+load: 50,
+angularVelocity: 0,
+isLifting: false
+});
+
+// Configuración del canvas
+useEffect(() => {
+const canvas = canvasRef.current;
+if (!canvas) return;
+
+```
+const ctx = canvas.getContext('2d');
+const width = canvas.width = 800;
+const height = canvas.height = 500;
+
+const animate = () => {
+  ctx.clearRect(0, 0, width, height);
+  
+  switch(activeSimulation) {
+    case 'conveyor':
+      drawConveyorBelt(ctx, width, height);
+      break;
+    case 'collision':
+      drawCollisionSystem(ctx, width, height);
+      break;
+    case 'crane':
+      drawCraneMechanism(ctx, width, height);
+      break;
+  }
+
+  if (isPlaying) {
+    animationRef.current = requestAnimationFrame(animate);
+  }
+};
+
+animate();
+
+return () => {
+  if (animationRef.current) {
+    cancelAnimationFrame(animationRef.current);
+  }
+};
+```
+
+}, [activeSimulation, isPlaying, conveyorState, collisionState, craneMechanism]);
+
+// Simulación de banda transportadora
+useEffect(() => {
+if (!isPlaying || activeSimulation !== ‘conveyor’) return;
+
+```
+const interval = setInterval(() => {
+  setConveyorState(prev => {
+    const newBoxes = prev.boxes.map(box => ({
+      ...box,
+      x: box.x + prev.beltSpeed * 0.016,
+      vx: box.vx + (prev.beltSpeed - box.vx) * prev.friction * 0.016
+    })).filter(box => box.x < 850);
+
+    // Agregar nueva caja aleatoriamente
+    const shouldAddBox = Math.random() < 0.02 && newBoxes.length < 5;
+    if (shouldAddBox) {
+      newBoxes.push({
+        x: -50,
+        y: 300,
+        vx: 0,
+        width: 40,
+        height: 40,
+        mass: Math.random() * 3 + 1,
+        color: `hsl(${Math.random() * 360}, 70%, 60%)`
+      });
+    }
+
+    return {
+      ...prev,
+      boxes: newBoxes,
+      time: prev.time + 0.016
+    };
+  });
+}, 16);
+
+return () => clearInterval(interval);
+```
+
+}, [isPlaying, activeSimulation]);
+
+// Simulación de choques oblicuos
+useEffect(() => {
+if (!isPlaying || activeSimulation !== ‘collision’) return;
+
+```
+const interval = setInterval(() => {
+  setCollisionState(prev => {
+    const newBalls = prev.balls.map(ball => {
+      let { x, y, vx, vy } = ball;
+      
+      // Actualizar posición
+      x += vx * 0.016;
+      y += vy * 0.016;
+      
+      // Colisión con paredes
+      if (x - ball.radius < 0 || x + ball.radius > 800) {
+        vx *= -prev.restitution;
+        x = x < 400 ? ball.radius : 800 - ball.radius;
+      }
+      if (y - ball.radius < 0 || y + ball.radius > 500) {
+        vy *= -prev.restitution;
+        y = y < 250 ? ball.radius : 500 - ball.radius;
+      }
+      
+      return { ...ball, x, y, vx, vy };
+    });
+
+    // Detectar colisión entre bolas
+    for (let i = 0; i < newBalls.length; i++) {
+      for (let j = i + 1; j < newBalls.length; j++) {
+        const ball1 = newBalls[i];
+        const ball2 = newBalls[j];
+        
+        const dx = ball2.x - ball1.x;
+        const dy = ball2.y - ball1.y;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+        
+        if (distance < ball1.radius + ball2.radius) {
+          // Colisión detectada - conservación de momento
+          const angle = Math.atan2(dy, dx);
+          const sin = Math.sin(angle);
+          const cos = Math.cos(angle);
+          
+          // Velocidades relativas
+          const vx1 = ball1.vx * cos + ball1.vy * sin;
+          const vy1 = ball1.vy * cos - ball1.vx * sin;
+          const vx2 = ball2.vx * cos + ball2.vy * sin;
+          const vy2 = ball2.vy * cos - ball2.vx * sin;
+          
+          // Nuevas velocidades (conservación de momento)
+          const m1 = ball1.mass;
+          const m2 = ball2.mass;
+          const newVx1 = ((m1 - m2) * vx1 + 2 * m2 * vx2) / (m1 + m2);
+          const newVx2 = ((m2 - m1) * vx2 + 2 * m1 * vx1) / (m1 + m2);
+          
+          // Rotar de vuelta
+          ball1.vx = newVx1 * cos - vy1 * sin;
+          ball1.vy = vy1 * cos + newVx1 * sin;
+          ball2.vx = newVx2 * cos - vy2 * sin;
+          ball2.vy = vy2 * cos + newVx2 * sin;
+          
+          // Separar bolas
+          const overlap = ball1.radius + ball2.radius - distance;
+          const separateX = (overlap / 2) * cos;
+          const separateY = (overlap / 2) * sin;
+          ball1.x -= separateX;
+          ball1.y -= separateY;
+          ball2.x += separateX;
+          ball2.y += separateY;
+        }
+      }
+    }
+
+    return { ...prev, balls: newBalls };
+  });
+}, 16);
+
+return () => clearInterval(interval);
+```
+
+}, [isPlaying, activeSimulation]);
+
+// Simulación de grúa (cinemática de cuerpo rígido)
+useEffect(() => {
+if (!isPlaying || activeSimulation !== ‘crane’) return;
+
+```
+const interval = setInterval(() => {
+  setCraneMechanism(prev => {
+    const torque = prev.isLifting ? -0.5 : 0.3;
+    const momentOfInertia = prev.armLength * prev.armLength * prev.load / 3;
+    const angularAcceleration = torque / momentOfInertia;
+    
+    let newAngularVelocity = prev.angularVelocity + angularAcceleration;
+    newAngularVelocity *= 0.98; // Fricción
+    
+    let newAngle = prev.armAngle + newAngularVelocity;
+    
+    // Límites del ángulo
+    if (newAngle < 10) {
+      newAngle = 10;
+      newAngularVelocity = 0;
+    } else if (newAngle > 170) {
+      newAngle = 170;
+      newAngularVelocity = 0;
+    }
+
+    return {
+      ...prev,
+      armAngle: newAngle,
+      angularVelocity: newAngularVelocity
+    };
+  });
+}, 16);
+
+return () => clearInterval(interval);
+```
+
+}, [isPlaying, activeSimulation]);
+
+// Funciones de dibujo
+const drawConveyorBelt = (ctx, width, height) => {
+// Dibujar banda
+ctx.fillStyle = ‘#374151’;
+ctx.fillRect(0, 320, width, 60);
+
+```
+// Líneas de movimiento
+const offset = (conveyorState.time * conveyorState.beltSpeed) % 40;
+ctx.strokeStyle = '#6B7280';
+ctx.lineWidth = 2;
+for (let i = -40; i < width; i += 40) {
+  ctx.beginPath();
+  ctx.moveTo(i + offset, 330);
+  ctx.lineTo(i + offset + 20, 370);
+  ctx.stroke();
+}
+
+// Dibujar cajas
+conveyorState.boxes.forEach(box => {
+  ctx.fillStyle = box.color;
+  ctx.fillRect(box.x, box.y, box.width, box.height);
+  ctx.strokeStyle = '#000';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(box.x, box.y, box.width, box.height);
+  
+  // Mostrar masa
+  ctx.fillStyle = '#fff';
+  ctx.font = '12px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText(`${box.mass.toFixed(1)}kg`, box.x + box.width/2, box.y + box.height/2 + 4);
+});
+
+// Información
+ctx.fillStyle = '#fff';
+ctx.font = '14px sans-serif';
+ctx.textAlign = 'left';
+ctx.fillText(`Velocidad de banda: ${conveyorState.beltSpeed.toFixed(0)} px/s`, 10, 30);
+ctx.fillText(`Coeficiente de fricción: ${conveyorState.friction.toFixed(2)}`, 10, 50);
+ctx.fillText(`Principio: Conservación de momento lineal`, 10, 450);
+```
+
+};
+
+const drawCollisionSystem = (ctx, width, height) => {
+// Fondo
+ctx.strokeStyle = ‘#4B5563’;
+ctx.lineWidth = 2;
+ctx.strokeRect(5, 5, width - 10, height - 10);
+
+```
+// Dibujar bolas
+collisionState.balls.forEach(ball => {
+  ctx.fillStyle = ball.color;
+  ctx.beginPath();
+  ctx.arc(ball.x, ball.y, ball.radius, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = '#000';
+  ctx.lineWidth = 2;
+  ctx.stroke();
+
+  // Vector velocidad
+  ctx.strokeStyle = '#FCD34D';
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.moveTo(ball.x, ball.y);
+  ctx.lineTo(ball.x + ball.vx * 0.5, ball.y + ball.vy * 0.5);
+  ctx.stroke();
+
+  // Masa
+  ctx.fillStyle = '#fff';
+  ctx.font = '14px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText(`${ball.mass}kg`, ball.x, ball.y + 5);
+});
+
+// Calcular momento total
+const totalMomentumX = collisionState.balls.reduce((sum, b) => sum + b.mass * b.vx, 0);
+const totalMomentumY = collisionState.balls.reduce((sum, b) => sum + b.mass * b.vy, 0);
+const totalMomentum = Math.sqrt(totalMomentumX ** 2 + totalMomentumY ** 2);
+
+// Información
+ctx.fillStyle = '#fff';
+ctx.font = '14px sans-serif';
+ctx.textAlign = 'left';
+ctx.fillText(`Momento total: ${totalMomentum.toFixed(1)} kg·px/s`, 10, 30);
+ctx.fillText(`Coeficiente de restitución: ${collisionState.restitution}`, 10, 50);
+ctx.fillText(`Principio: Conservación de momento en choques oblicuos`, 10, 480);
+```
+
+};
+
+const drawCraneMechanism = (ctx, width, height) => {
+const baseX = 400;
+const baseY = 400;
+const angle = (craneMechanism.armAngle * Math.PI) / 180;
+const endX = baseX + Math.cos(angle) * craneMechanism.armLength;
+const endY = baseY - Math.sin(angle) * craneMechanism.armLength;
+
+```
+// Base
+ctx.fillStyle = '#6B7280';
+ctx.fillRect(baseX - 30, baseY, 60, 50);
+ctx.strokeStyle = '#000';
+ctx.lineWidth = 2;
+ctx.strokeRect(baseX - 30, baseY, 60, 50);
+
+// Brazo
+ctx.strokeStyle = '#3B82F6';
+ctx.lineWidth = 8;
+ctx.beginPath();
+ctx.moveTo(baseX, baseY);
+ctx.lineTo(endX, endY);
+ctx.stroke();
+
+// Articulación
+ctx.fillStyle = '#1F2937';
+ctx.beginPath();
+ctx.arc(baseX, baseY, 12, 0, Math.PI * 2);
+ctx.fill();
+ctx.strokeStyle = '#000';
+ctx.lineWidth = 2;
+ctx.stroke();
+
+// Carga
+ctx.fillStyle = '#EF4444';
+ctx.fillRect(endX - 20, endY - 10, 40, 40);
+ctx.strokeStyle = '#000';
+ctx.strokeRect(endX - 20, endY - 10, 40, 40);
+
+// Cable
+ctx.strokeStyle = '#9CA3AF';
+ctx.lineWidth = 2;
+ctx.setLineDash([5, 5]);
+ctx.beginPath();
+ctx.moveTo(endX, endY);
+ctx.lineTo(endX, endY + 30);
+ctx.stroke();
+ctx.setLineDash([]);
+
+// Vector velocidad angular
+const arrowLength = 50;
+const arrowX = baseX + Math.cos(angle + Math.PI/2) * arrowLength;
+const arrowY = baseY - Math.sin(angle + Math.PI/2) * arrowLength;
+
+if (Math.abs(craneMechanism.angularVelocity) > 0.1) {
+  ctx.strokeStyle = '#10B981';
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.arc(baseX, baseY, arrowLength, -angle, -angle + craneMechanism.angularVelocity * 0.5, craneMechanism.angularVelocity > 0);
+  ctx.stroke();
+}
+
+// Información
+ctx.fillStyle = '#fff';
+ctx.font = '14px sans-serif';
+ctx.textAlign = 'left';
+ctx.fillText(`Ángulo: ${craneMechanism.armAngle.toFixed(1)}°`, 10, 30);
+ctx.fillText(`Velocidad angular: ${craneMechanism.angularVelocity.toFixed(2)} rad/frame`, 10, 50);
+ctx.fillText(`Carga: ${craneMechanism.load} kg`, 10, 70);
+ctx.fillText(`Principio: Cinemática de cuerpo rígido y torque`, 10, 480);
+```
+
+};
+
+const resetSimulation = () => {
+setIsPlaying(false);
+switch(activeSimulation) {
+case ‘conveyor’:
+setConveyorState({ boxes: [], beltSpeed: 50, friction: 0.3, time: 0 });
+break;
+case ‘collision’:
+setCollisionState({
+balls: [
+{ x: 100, y: 200, vx: 80, vy: 0, mass: 2, radius: 20, color: ‘#3B82F6’ },
+{ x: 500, y: 200, vx: -40, vy: 30, mass: 3, radius: 25, color: ‘#EF4444’ }
+],
+restitution: 0.8
+});
+break;
+case ‘crane’:
+setCraneMechanism({
+armAngle: 45,
+armLength: 150,
+load: 50,
+angularVelocity: 0,
+isLifting: false
+});
+break;
+}
+};
+
+return (
+<div className="w-full max-w-6xl mx-auto p-6 bg-gray-50">
+<div className="bg-white rounded-lg shadow-lg overflow-hidden">
+{/* Header */}
+<div className="bg-gradient-to-r from-blue-600 to-blue-800 text-white p-6">
+<h1 className="text-3xl font-bold mb-2">Simulador de Procesos Industriales</h1>
+<p className="text-blue-100">Física Aplicada: Momento Lineal, Choques Oblicuos y Cinemática de Cuerpo Rígido</p>
+</div>
+
+```
+    {/* Selector de simulación */}
+    <div className="flex border-b bg-gray-100">
+      <button
+        onClick={() => { setActiveSimulation('conveyor'); setIsPlaying(false); }}
+        className={`flex-1 py-4 px-6 font-semibold transition-colors ${
+          activeSimulation === 'conveyor' 
+            ? 'bg-white text-blue-600 border-b-2 border-blue-600' 
+            : 'text-gray-600 hover:bg-gray-200'
+        }`}
+      >
+        Banda Transportadora
+      </button>
+      <button
+        onClick={() => { setActiveSimulation('collision'); setIsPlaying(false); }}
+        className={`flex-1 py-4 px-6 font-semibold transition-colors ${
+          activeSimulation === 'collision' 
+            ? 'bg-white text-blue-600 border-b-2 border-blue-600' 
+            : 'text-gray-600 hover:bg-gray-200'
+        }`}
+      >
+        Choques Oblicuos
+      </button>
+      <button
+        onClick={() => { setActiveSimulation('crane'); setIsPlaying(false); }}
+        className={`flex-1 py-4 px-6 font-semibold transition-colors ${
+          activeSimulation === 'crane' 
+            ? 'bg-white text-blue-600 border-b-2 border-blue-600' 
+            : 'text-gray-600 hover:bg-gray-200'
+        }`}
+      >
+        Grúa Industrial
+      </button>
+    </div>
+
+    {/* Canvas */}
+    <div className="p-6 bg-gray-900">
+      <canvas
+        ref={canvasRef}
+        width={800}
+        height={500}
+        className="w-full border-2 border-gray-700 rounded-lg"
+      />
+    </div>
+
+    {/* Controles */}
+    <div className="p-6 bg-white border-t">
+      <div className="flex items-center justify-between mb-6">
+        <div className="flex gap-3">
+          <button
+            onClick={() => setIsPlaying(!isPlaying)}
+            className="flex items-center gap-2 px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-semibold"
+          >
+            {isPlaying ? <Pause size={20} /> : <Play size={20} />}
+            {isPlaying ? 'Pausar' : 'Iniciar'}
+          </button>
+          <button
+            onClick={resetSimulation}
+            className="flex items-center gap-2 px-6 py-3 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors font-semibold"
+          >
+            <RotateCcw size={20} />
+            Reiniciar
+          </button>
+        </div>
+        <button
+          onClick={() => setShowInfo(!showInfo)}
+          className="flex items-center gap-2 px-6 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors font-semibold"
+        >
+          <Info size={20} />
+          Info Técnica
+        </button>
+      </div>
+
+      {/* Controles específicos */}
+      {activeSimulation === 'conveyor' && (
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <label className="block text-sm font-semibold text-gray-700 mb-2">
+              Velocidad de banda: {conveyorState.beltSpeed.toFixed(0)} px/s
+            </label>
+            <input
+              type="range"
+              min="20"
+              max="150"
+              value={conveyorState.beltSpeed}
+              onChange={(e) => setConveyorState(prev => ({ ...prev, beltSpeed: Number(e.target.value) }))}
+              className="w-full"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-semibold text-gray-700 mb-2">
+              Fricción: {conveyorState.friction.toFixed(2)}
+            </label>
+            <input
+              type="range"
+              min="0.1"
+              max="0.9"
+              step="0.1"
+              value={conveyorState.friction}
+              onChange={(e) => setConveyorState(prev => ({ ...prev, friction: Number(e.target.value) }))}
+              className="w-full"
+            />
+          </div>
+        </div>
+      )}
+
+      {activeSimulation === 'collision' && (
+        <div>
+          <label className="block text-sm font-semibold text-gray-700 mb-2">
+            Coeficiente de restitución: {collisionState.restitution.toFixed(2)}
+          </label>
+          <input
+            type="range"
+            min="0.1"
+            max="1.0"
+            step="0.1"
+            value={collisionState.restitution}
+            onChange={(e) => setCollisionState(prev => ({ ...prev, restitution: Number(e.target.value) }))}
+            className="w-full"
+          />
+        </div>
+      )}
+
+      {activeSimulation === 'crane' && (
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <label className="block text-sm font-semibold text-gray-700 mb-2">
+              Carga: {craneMechanism.load} kg
+            </label>
+            <input
+              type="range"
+              min="10"
+              max="100"
+              value={craneMechanism.load}
+              onChange={(e) => setCraneMechanism(prev => ({ ...prev, load: Number(e.target.value) }))}
+              className="w-full"
+            />
+          </div>
+          <div className="flex items-end">
+            <button
+              onClick={() => setCraneMechanism(prev => ({ ...prev, isLifting: !prev.isLifting }))}
+              className={`w-full px-4 py-2 rounded-lg font-semibold transition-colors ${
+                craneMechanism.isLifting 
+                  ? 'bg-red-600 text-white hover:bg-red-700' 
+                  : 'bg-green-600 text-white hover:bg-green-700'
+              }`}
+            >
+              {craneMechanism.isLifting ? 'Bajar' : 'Levantar'}
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+
+    {/* Panel de información */}
+    {showInfo && (
+      <div className="p-6 bg-blue-50 border-t">
+        <h3 className="text-xl font-bold text-blue-900 mb-4">Información Técnica</h3>
+        {activeSimulation === 'conveyor' && (
+          <div className="space-y-3 text-gray-700">
+            <p><strong>Principio físico:</strong> Conservación de momento lineal</p>
+            <p><strong>Ecuación:</strong> p = mv (momento = masa × velocidad)</p>
+            <p><strong>Aplicación:</strong> Las cajas aceleran gradualmente debido a la fricción con la banda hasta alcanzar su velocidad. La transferencia de momento es proporcional al coeficiente de fricción.</p>
+            <p><strong>Industria:</strong> Líneas de ensamblaje, logística, clasificación de paquetes</p>
+          </div>
+        )}
+        {activeSimulation === 'collision' && (
+          <div className="space-y-3 text-gray-700">
+            <p><strong>Principio físico:</strong> Conservación de momento en colisiones oblicuas</p>
+            <p><strong>Ecuación:</strong> m₁v₁ + m₂v₂ = m₁v₁' + m₂v₂' (antes = después)</p>
+            <p><strong>Coeficiente de restitución:</strong> e = velocidad de separación / velocidad de aproximación</p>
+            <p><strong>Aplicación:</strong> En choques oblicuos, el momento se conserva en ambas direcciones (x, y). El coeficiente de restitución determina cuánta energía se conserva.</p>
+            <p><strong>Industria:</strong> Molinos de bolas, sistemas de clasificación por impacto, estudios de seguridad</p>
+          </div>
+        )}
+        {activeSimulation === 'crane' && (
+          <div className="space-y-3 text-gray-700">
+            <p><strong>Principio físico:</strong> Cinemática de cuerpo rígido y dinámica rotacional</p>
+            <p><strong>Ecuaciones:</strong> τ = Iα (torque = momento de inercia × aceleración angular)</p>
+            <p><strong>Momento de inercia:</strong> I = mL²/3 (para brazo con masa en el extremo)</p>
+            <p><strong>Aplicación:</strong> El torque aplicado produce aceleración angular. La carga afecta el momento de inercia y por tanto la respuesta dinámica del sistema.</p>
+            <p><strong>Industria:</strong> Grúas, excavadoras, robots industriales, sistemas de manipulación</p>
+          </div>
+        )}
+      </div>
+    )}
+  </div>
+</div>
+```
+
+);
+};
+
+export default IndustrialPhysicsSimulator;
